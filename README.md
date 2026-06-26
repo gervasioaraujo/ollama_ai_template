@@ -81,3 +81,5 @@ In this section, you will learn how to build and run the Python application that
 * **Stop all services:** `docker-compose down`
 * **Clean everything (stops services, removes volumes/models, and cleans orphans):** `docker-compose down -v --remove-orphans`
 * **View logs:** `docker-compose logs -f`
+* **List downloaded models and their sizes:** `docker exec -it ollama-service ollama list`
+* **Show technical details/manifest of a specific model:** `docker exec -it ollama-service ollama show <model_name>`

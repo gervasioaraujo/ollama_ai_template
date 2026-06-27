@@ -1,23 +1,33 @@
 services:
-  ollama:
+  ollama-service:
     image: ollama/ollama:latest
     container_name: ollama-service
     ports:
       - "11434:11434"
     volumes:
-      - ollama_data:/root/.ollama
-
-  python-app:
-    build:
-      context: ./python_app
-      dockerfile: Dockerfile
-    container_name: python-app
-    depends_on:
-      - ollama
+      - ./data/ollama:/root/.ollama
+  
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+    volumes:
+      - ./data/open-webui:/app/backend/data
+    depends_on:
+      - ollama-service
+    restart: always
+
+  python-apps:
+    build:
+      context: ./python_apps
+      dockerfile: Dockerfile
+    container_name: python-apps
+    depends_on:
+      - ollama-service
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-service:11434
     volumes:
       - .:/app
-
-volumes:
-  ollama_data:

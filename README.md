@@ -10,7 +10,7 @@ If you want to interact with the models directly through your terminal without r
 
 1. **Start only the Ollama container:**
    ```bash
-   docker-compose up -d ollama
+   docker-compose up -d ollama-service
    ```
 
 2. **Access the container and run the model:**
@@ -56,12 +56,46 @@ If you want to interact with the models directly through your terminal without r
 4. **Stopping the service:**
    To stop the container, use:
    ```bash
-   docker-compose stop ollama
+   docker-compose stop ollama-service
    ```
 
 ---
 
-## 2. Python Application (Coming Soon)
+## 2. Optional: Running via Open WebUI (Graphical Interface)
+
+As an alternative to the terminal chat, you can choose to spin up **Open WebUI**. This provides a full ChatGPT-like web interface that connects directly to your local Ollama backend.
+
+### What Open WebUI adds to your workflow:
+* **Persistent History:** Automatically saves all your chats, allowing you to resume any conversation later.
+* **Topic Organization:** Categorizes and splits your chats into different topics and history sidebars just like commercial web AI tools.
+* **Document Uploads (RAG UI):** Allows you to drag and drop PDFs, text files, or URLs to chat with your private data natively through the browser.
+* **User Management:** Multiple local accounts can be created, all securely stored offline on your machine.
+
+### How to use it:
+
+1. **Start the Open WebUI container:**
+   ```bash
+   docker-compose up -d open-webui
+   ```
+
+2. **Access the interface:**
+   Open your web browser and navigate to **`http://localhost:3000`**.
+
+3. **First-time Setup:**
+   Click to sign up and create a local administrator account (Name, Email, and Password). This setup is **100% offline** and your credentials never leave your machine.
+
+4. **Chatting:**
+   Select your desired model (e.g., `gemma4`) from the dropdown list at the top of the interface and start typing your prompts.
+
+5. **Stopping the interface:**
+   To stop the web interface service, use:
+   ```bash
+   docker-compose stop open-webui
+   ```
+
+---
+
+## 3. Python Application (Coming Soon)
 
 In this section, you will learn how to build and run the Python application that connects to the Ollama service to perform various AI tasks.
 
@@ -75,11 +109,11 @@ In this section, you will learn how to build and run the Python application that
 
 ---
 
-## 3. General Commands
+## 4. General Commands
 
 * **Start all services:** `docker-compose up -d --build`
 * **Stop all services:** `docker-compose down`
-* **Clean everything (stops services, removes volumes/models, and cleans orphans):** `docker-compose down -v --remove-orphans`
+* **Clean containers & network (Local data inside `./data` remains completely safe):** `docker-compose down -v --remove-orphans`
 * **View logs:** `docker-compose logs -f`
 * **List downloaded models and their sizes:** `docker exec -it ollama-service ollama list`
 * **Show technical details/manifest of a specific model:** `docker exec -it ollama-service ollama show <model_name>`

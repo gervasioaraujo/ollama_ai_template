@@ -95,7 +95,56 @@ As an alternative to the terminal chat, you can choose to spin up **Open WebUI**
 
 ---
 
-## 3. Python Application (Coming Soon)
+## 3. Optional: Creating a Custom Model
+
+Sometimes the default model parameters aren't ideal for your use case. For example, the default context window may be too small for very large prompts, causing Ollama to **truncate** your input (cutting off part of the prompt before the model even sees it). You can create a custom model based on any existing one, with your own baked-in parameters.
+
+This example creates `custom-gemma4`, based on `gemma4`, with a larger context window and response limit — useful for long prompts (e.g. extracting a structured JSON list from a big document).
+
+1. **Make sure the base model is already downloaded.** The custom model builds on top of it (`FROM gemma4`), so the base must exist locally first.
+   If you've already pulled or run `gemma4` before, it's cached — **skip this step**. Otherwise, download it:
+   ```bash
+   docker exec -it ollama-service ollama pull gemma4
+   ```
+ 
+   > **Tip:** Running this when the model is already present does no harm — Ollama just verifies it's up to date and exits quickly, without re-downloading. You can check what's already available with `docker exec -it ollama-service ollama list`.
+
+2. **Create a `Modelfile`.** This project keeps them organized inside the `custom_models/` folder, which is mounted into the container via `docker-compose.yml`. For example, `custom_models/custom-gemma4.Modelfile`:
+   ```Dockerfile
+   FROM gemma4
+   PARAMETER num_ctx 20000
+   PARAMETER num_predict 4096
+   ```
+
+   * `num_ctx` — total context size (prompt **plus** response). Raise this if large prompts are being truncated. It must comfortably exceed your prompt size, with room left over for the answer.
+   * `num_predict` — maximum number of tokens the model may generate in its response.
+
+   > **Note:** A larger `num_ctx` consumes more RAM and, on CPU-only setups, makes processing noticeably slower. Increase it only as much as your prompts actually need.
+
+3. **Build the custom model.** The `custom_models/` folder is mounted at `/custom_models` inside the container:
+   ```bash
+   docker exec -it ollama-service ollama create custom-gemma4 -f /custom_models/custom-gemma4.Modelfile
+   ```
+
+4. **Confirm it was created:**
+   ```bash
+   docker exec -it ollama-service ollama list
+   ```
+   You should see `custom-gemma4` listed alongside the base `gemma4`.
+
+5. **Use it.** In the terminal:
+   ```bash
+   docker exec -it ollama-service ollama run custom-gemma4
+   ```
+   Or select `custom-gemma4` from the model dropdown in Open WebUI.
+
+   > **Order matters:** `custom-gemma4` is a **local** model — it does not exist in any remote registry. Running `ollama run custom-gemma4` *before* creating it will fail, since Ollama won't find it to download. Always run the `create` command (step 3) first.
+
+The custom model is stored in your `./data/ollama` volume, so it **persists** across container restarts. You only need to recreate it if you change the `Modelfile`. To add more custom models (based on Llama, Qwen, etc.), drop another `.Modelfile` into `custom_models/` and repeat step 3 with a new name.
+
+---
+
+## 4. Python Application (Coming Soon)
 
 In this section, you will learn how to build and run the Python application that connects to the Ollama service to perform various AI tasks.
 
@@ -109,7 +158,7 @@ In this section, you will learn how to build and run the Python application that
 
 ---
 
-## 4. General Commands
+## 5. General Commands
 
 * **Start all services:** `docker-compose up -d --build`
 * **Stop all services:** `docker-compose down`

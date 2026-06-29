@@ -153,22 +153,39 @@ Error: 500 Internal Server Error: llama-server process has terminated:
 GGML_ASSERT(n_inputs < GGML_SCHED_MAX_SPLIT_INPUTS) failed
 ```
 
-The cause: `gemma4` is far bigger than 4 GB, so it ran in split mode. Multimodal (vision) models generate many input "splits," and the split count exceeded an internal scheduler limit (`GGML_SCHED_MAX_SPLIT_INPUTS`). On CPU-only there's no split, so it never happened before enabling the GPU.
+The cause: `gemma4` is far bigger than 4 GB, so Ollama tried to **auto-split** it across GPU and CPU. The number of input "splits" the scheduler generated exceeded an internal compiled-in limit (`GGML_SCHED_MAX_SPLIT_INPUTS`). Multimodal (vision) models tend to produce more splits, which makes them more prone to this, but the root trigger is the **automatic split with too many layers offloaded** — not multimodality by itself. On CPU-only there's no split, so it never happened before enabling the GPU.
+
+Importantly, this crash is **avoidable without giving up the GPU entirely** — see "Capping `num_gpu`" below. Letting Ollama decide how many layers to offload is what overshoots the limit; manually capping the layer count keeps the split count under the threshold.
 
 **Takeaway:** enabling the GPU does *not* magically speed up an oversized model. If the model doesn't fit, you either get a slow split or a crash. The fix is to use a model that fits — see the next section.
 
-### Forcing a specific model onto the CPU
+### `num_gpu`: from "off" to a capped split
 
-If you want to keep using a large model (like `gemma4`) even with the GPU stack running, you can force *that model* to stay 100% on the CPU by adding `num_gpu 0` to its Modelfile. This avoids the split/crash, at the cost of speed:
+`num_gpu` controls **how many of the model's layers Ollama offloads to the GPU**. It's not just an on/off switch — it's a dial, and on a small card it's your main tool for working with a model that doesn't fully fit.
+
+**Option A — force fully onto the CPU (`num_gpu 0`).** This keeps a large model 100% on the CPU even with the GPU stack running. It sidesteps the split entirely, so there's no crash — at the cost of any GPU speedup:
 
 ```Dockerfile
-FROM gemma4
+FROM gemma4:e4b
 PARAMETER num_ctx 20000
 PARAMETER num_predict 4096
 PARAMETER num_gpu 0
 ```
 
-This is per-model: the GPU stays available for other, smaller models. (Note: `num_gpu 0` only affects the custom model that declares it, not the base model it's built `FROM`.)
+**Option B — cap the layers to allow a partial split.** Instead of fully off, you can offload *some* layers. The trick on a 4 GB card: if you let Ollama auto-decide, it overshoots and crashes (`GGML_ASSERT`). Capping `num_gpu` at a low number keeps the split count under the limit, so it runs — partially on the GPU:
+
+```Dockerfile
+FROM gemma4:e4b
+PARAMETER num_ctx 20000
+PARAMETER num_predict 4096
+PARAMETER num_gpu 15
+```
+
+On the GTX 1650, `num_gpu 15` was the kind of value that ran without crashing, while `num_gpu 20` brought the crash back — so the usable ceiling sat somewhere between the two. Find your own ceiling by testing values (e.g. 10 → 15 → 20…), recreating the model and running it each time; the highest value that doesn't crash is your optimum.
+
+This is per-model: the `num_gpu` setting only affects the custom model that declares it, not the base model it's built `FROM`, and not other models. The GPU stays available for smaller models that *do* fit fully.
+
+> **Honest expectation on 4 GB:** for an oversized model like E4B, the partial split is only a **marginal** speedup. In testing, `num_gpu 15` put just ~16% of the work on the GPU (the rest stayed on CPU), because the model weights alone far exceed 4 GB. And a surprising finding: **lowering `num_ctx` did not free up meaningful room** for more GPU layers — dropping from 20000 to 4096 left the GPU share essentially unchanged (~14–16%). That's because the bottleneck here is the **model weight size**, not the KV cache. The real fix for speed is still a model that fits (next section), not tuning `num_gpu`/`num_ctx` on a too-big one.
 
 ---
 
@@ -184,19 +201,22 @@ These are the actual `ollama ps` outcomes measured on the 4 GB card used for thi
 
 | Model | Reported SIZE | PROCESSOR result | Notes |
 | --- | --- | --- | --- |
-| `gemma4` (~9.6 GB) | 9.6 GB | crash in split mode | `GGML_ASSERT` — far too big (see section 5) |
+| `gemma4:e4b` (~9.6 GB) | 9.6 GB | crash on auto-split | `GGML_ASSERT` — far too big (see section 5) |
+| `gemma4:e4b` + `num_gpu 15` | 11 GB | `84%/16% CPU/GPU` | capped split avoids the crash; only ~16% on GPU |
+| `gemma4:e2b` | 8.4 GB | `83%/17% CPU/GPU` | "2B" name is misleading — PLE + vision push real memory to 8.4 GB; doesn't fit 4 GB |
 | `gemma3:4b` | 4.3 GB | `60%/40% CPU/GPU` | just over 4 GB → split, no crash, partial speedup |
 | `llama3.2:1b` | 1.5 GB | `100% GPU` ✅ | fits comfortably, fully accelerated |
 
-The lesson: on a 4 GB card, a nominal "4B" model is right at the edge and tends to spill into a split. The **1B-class models are the ones that reliably hit 100% GPU** here. If your card has more VRAM (8 GB+), the 4B models become comfortable.
+The lesson: on a 4 GB card, every Gemma 4 variant (including the "mobile" E2B) is too large to run well — they all land in a CPU-heavy split. A nominal "4B" model like `gemma3:4b` is right at the edge. The **1B-class models are the ones that reliably hit 100% GPU** here. If your card has more VRAM (8 GB+), the 4B models become comfortable.
 
 ### If you need vision (image understanding)
 
-* **`gemma3:4b`** — native vision, same family as `gemma4`. On this 4 GB card it ran as a **60/40 split** (still works, partial GPU speedup, no crash). On an 8 GB+ card it would run fully on the GPU.
+* **`gemma3:4b`** — native vision, same family as `gemma4`. On this 4 GB card it ran as a **60/40 split** (still works, partial GPU speedup, no crash). On an 8 GB+ card it would run fully on the GPU. It was the best *multimodal* result achieved on 4 GB.
   ```bash
   docker exec -it ollama-service ollama pull gemma3:4b
   docker exec -it ollama-service ollama run gemma3:4b
   ```
+* **Note on `gemma4:e2b`:** despite the "2B / mobile" label, it reported 8.4 GB and ran 83% on the CPU here — the Per-Layer Embeddings (PLE) architecture plus the vision component push its real memory footprint well past 4 GB. It is *not* a lightweight option on this card.
 * Even smaller vision options exist (e.g. SmolVLM2 ~2.2B, or PaddleOCR-VL ~0.9B for documents specifically). There is no Gemma vision model small enough to run 100% on the GPU within 4 GB, so on this card vision means accepting a split.
 
 ### If you only need text

@@ -4,6 +4,18 @@ This project provides a local environment using Docker to run LLMs via **Ollama*
 
 ---
 
+## Requirements
+
+Before running the project, make sure you have the following installed on your host machine:
+
+* **Docker** — the container runtime. [Install guide](https://docs.docker.com/engine/install/).
+* **Docker Compose** — used to orchestrate the services in this project. Recent Docker installs include it as the `docker compose` plugin; this project's commands use the standalone `docker-compose` (v1) syntax, so adjust if yours differs.
+* **NVIDIA Container Toolkit** — **only required if you want GPU acceleration on an NVIDIA GPU.** It lets the Ollama container access your host GPU. Setup is fully documented in [README.gpu.md](./README.gpu.md). The project runs fine on CPU without it — just slower.
+
+> **Note on GPU vendors:** This project's GPU instructions assume an **NVIDIA** GPU (the most common for local AI, via CUDA). AMD (via ROCm) and Apple Silicon (via Metal) are also supported by Ollama, but they require a different setup that is **not covered here** — see the [Ollama GPU docs](https://github.com/ollama/ollama/blob/main/docs/gpu.md) for those.
+
+---
+
 ## 1. Running the Ollama Chat via Terminal
 
 If you want to interact with the models directly through your terminal without running the entire application, follow these steps:
@@ -20,6 +32,8 @@ If you want to interact with the models directly through your terminal without r
 
    > **Note:** The first time you run a model, Ollama needs to download it before the chat starts. This can take several minutes depending on the model size and your connection. Subsequent runs load instantly from cache.
 
+   > **Which variant does `gemma4` pull?** Running `ollama run gemma4` (or `ollama pull gemma4`) without a tag downloads `gemma4:latest`, which is the **E4B** variant (~4.5B effective parameters, ~9.6 GB download). If you see `gemma4:latest` in `ollama list`, that is the E4B. To use a specific size, always pass an explicit tag (e.g. `gemma4:e2b`). See the variants table below.
+
    By default, Gemma 4 runs in **thinking mode**, displaying a visible `Thinking...` reasoning block before the final answer. This is useful for complex logic, math, and coding, but verbose for everyday chat.
 
    * **To disable reasoning (direct answers):** start the model with thinking turned off:
@@ -33,6 +47,17 @@ If you want to interact with the models directly through your terminal without r
      (Use `/set think` to turn it back on.)
 
    > **Tip:** Thinking-mode control requires a recent Ollama version. Check yours with `docker exec -it ollama-service ollama --version` and update if the flag isn't recognized. To confirm the exact model tag you pulled, run `docker exec -it ollama-service ollama list`.
+
+   **Gemma 4 variants by target device.** The Gemma 4 family ships in several sizes for different hardware. Pick the one that matches your RAM/VRAM:
+
+   | Variant | Approx. VRAM | Target device | Notes |
+   | --- | --- | --- | --- |
+   | **E2B** | ~2 GB | Mobile / edge (phones, Raspberry Pi 5, Jetson) | Smallest; multimodal; lightest reasoning |
+   | **E4B** (`latest`) | ~5 GB | Laptop / edge (GTX 1060 6GB and up) | Default tag; multimodal; good all-round small model |
+   | **26B-A4B** | ~15–18 GB | Desktop (RTX 3090/4090, 32 GB Apple Silicon) | MoE — only ~4B active params per token, so ~4B speed with much higher quality |
+   | **31B** | ~20 GB | Workstation / server / cloud | Dense; maximum quality |
+
+   > The `E` prefix means *Efficient* (edge-optimized). `26B-A4B` is a Mixture-of-Experts model: 26B total parameters but only ~4B active per token. Pull a specific variant with its tag, e.g. `ollama run gemma4:e2b` or `ollama run gemma4:26b-a4b`. Numbers above are approximate and change over time — confirm on the [Ollama library](https://ollama.com/library).
 
    **Other popular open-source models** you can swap in (replace `gemma4` in the command above):
 
@@ -99,46 +124,48 @@ As an alternative to the terminal chat, you can choose to spin up **Open WebUI**
 
 Sometimes the default model parameters aren't ideal for your use case. For example, the default context window may be too small for very large prompts, causing Ollama to **truncate** your input (cutting off part of the prompt before the model even sees it). You can create a custom model based on any existing one, with your own baked-in parameters.
 
-This example creates `custom-gemma4`, based on `gemma4`, with a larger context window and response limit — useful for long prompts (e.g. extracting a structured JSON list from a big document).
+This example creates `custom-gemma4-e4b`, based on `gemma4:e4b`, with a larger context window and response limit — useful for long prompts (e.g. extracting a structured JSON list from a big document).
 
-1. **Make sure the base model is already downloaded.** The custom model builds on top of it (`FROM gemma4`), so the base must exist locally first.
-   If you've already pulled or run `gemma4` before, it's cached — **skip this step**. Otherwise, download it:
+1. **Make sure the base model is already downloaded.** The custom model builds on top of it (`FROM gemma4:e4b`), so the base must exist locally first.
+   If you've already pulled or run `gemma4:e4b` before, it's cached — **skip this step**. Otherwise, download it:
    ```bash
-   docker exec -it ollama-service ollama pull gemma4
+   docker exec -it ollama-service ollama pull gemma4:e4b
    ```
  
    > **Tip:** Running this when the model is already present does no harm — Ollama just verifies it's up to date and exits quickly, without re-downloading. You can check what's already available with `docker exec -it ollama-service ollama list`.
 
-2. **Create a `Modelfile`.** This project keeps them organized inside the `custom_models/` folder, which is mounted into the container via `docker-compose.yml`. For example, `custom_models/custom-gemma4.Modelfile`:
+2. **Create a `Modelfile`.** This project keeps them organized inside the `custom_models/` folder, which is mounted into the container via `docker-compose.yml`. For example, `custom_models/custom-gemma4-e4b.Modelfile`:
    ```Dockerfile
-   FROM gemma4
+   FROM gemma4:e4b
    PARAMETER num_ctx 20000
    PARAMETER num_predict 4096
+   PARAMETER num_gpu 15
    ```
 
    * `num_ctx` — total context size (prompt **plus** response). Raise this if large prompts are being truncated. It must comfortably exceed your prompt size, with room left over for the answer.
    * `num_predict` — maximum number of tokens the model may generate in its response.
+   * `num_gpu` — how many model layers to offload to the GPU. This is **optional and hardware-specific**: it only matters when running with GPU acceleration. On a small 4 GB card, a large model like E4B does not fit in VRAM, and letting Ollama auto-split can crash with a `GGML_ASSERT` error; capping `num_gpu` (e.g. `15`) avoids the crash and runs a partial GPU/CPU split. Remove this line or set it higher on bigger GPUs. See [README.gpu.md](./README.gpu.md) for the full explanation.
 
    > **Note:** A larger `num_ctx` consumes more RAM and, on CPU-only setups, makes processing noticeably slower. Increase it only as much as your prompts actually need.
 
 3. **Build the custom model.** The `custom_models/` folder is mounted at `/custom_models` inside the container:
    ```bash
-   docker exec -it ollama-service ollama create custom-gemma4 -f /custom_models/custom-gemma4.Modelfile
+   docker exec -it ollama-service ollama create custom-gemma4-e4b -f /custom_models/custom-gemma4-e4b.Modelfile
    ```
 
 4. **Confirm it was created:**
    ```bash
    docker exec -it ollama-service ollama list
    ```
-   You should see `custom-gemma4` listed alongside the base `gemma4`.
+   You should see `custom-gemma4-e4b` listed alongside the base `gemma4:e4b`.
 
 5. **Use it.** In the terminal:
    ```bash
-   docker exec -it ollama-service ollama run custom-gemma4
+   docker exec -it ollama-service ollama run custom-gemma4-e4b
    ```
-   Or select `custom-gemma4` from the model dropdown in Open WebUI.
+   Or select `custom-gemma4-e4b` from the model dropdown in Open WebUI.
 
-   > **Order matters:** `custom-gemma4` is a **local** model — it does not exist in any remote registry. Running `ollama run custom-gemma4` *before* creating it will fail, since Ollama won't find it to download. Always run the `create` command (step 3) first.
+   > **Order matters:** `custom-gemma4-e4b` is a **local** model — it does not exist in any remote registry. Running `ollama run custom-gemma4-e4b` *before* creating it will fail, since Ollama won't find it to download. Always run the `create` command (step 3) first.
 
 The custom model is stored in your `./data/ollama` volume, so it **persists** across container restarts. You only need to recreate it if you change the `Modelfile`. To add more custom models (based on Llama, Qwen, etc.), drop another `.Modelfile` into `custom_models/` and repeat step 3 with a new name.
 

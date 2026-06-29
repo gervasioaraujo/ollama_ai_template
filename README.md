@@ -32,7 +32,9 @@ If you want to interact with the models directly through your terminal without r
 
    > **Note:** The first time you run a model, Ollama needs to download it before the chat starts. This can take several minutes depending on the model size and your connection. Subsequent runs load instantly from cache.
 
-   > **Which variant does `gemma4` pull?** Running `ollama run gemma4` (or `ollama pull gemma4`) without a tag downloads `gemma4:latest`, which is the **E4B** variant (~4.5B effective parameters, ~9.6 GB download). If you see `gemma4:latest` in `ollama list`, that is the E4B. To use a specific size, always pass an explicit tag (e.g. `gemma4:e2b`). See the variants table below.
+   > **Which variant does `gemma4` pull?** Running `ollama run gemma4` (or `ollama pull gemma4`) without a tag downloads `gemma4:latest`, which is the **E4B** variant (~4.5B effective parameters). If you see `gemma4:latest` in `ollama list`, that is the E4B. To use a specific size, always pass an explicit tag (e.g. `gemma4:e2b`). See the variants table below.
+   >
+   > **Download size vs VRAM:** these are two different numbers. The **download** is the size of the model file on disk (the E4B is roughly 9–10 GB). The **VRAM** figure in the table below (~4.5 GB for E4B) is how much GPU memory the weights occupy at runtime in Q4_0 quantization. Don't confuse the two — and remember the running footprint grows further once the context window is added.
 
    By default, Gemma 4 runs in **thinking mode**, displaying a visible `Thinking...` reasoning block before the final answer. This is useful for complex logic, math, and coding, but verbose for everyday chat.
 
@@ -48,16 +50,19 @@ If you want to interact with the models directly through your terminal without r
 
    > **Tip:** Thinking-mode control requires a recent Ollama version. Check yours with `docker exec -it ollama-service ollama --version` and update if the flag isn't recognized. To confirm the exact model tag you pulled, run `docker exec -it ollama-service ollama list`.
 
-   **Gemma 4 variants by target device.** The Gemma 4 family ships in several sizes for different hardware. Pick the one that matches your RAM/VRAM:
+   **Gemma 4 variants by target device.** The Gemma 4 family ships in **five** sizes for different hardware. Pick the one that matches your RAM/VRAM. VRAM figures below are the official approximate values for loading the model weights at **Q4_0 (4-bit)** quantization — actual usage is higher once you add the context window (KV cache) and runtime overhead.
 
-   | Variant | Approx. VRAM | Target device | Notes |
-   | --- | --- | --- | --- |
-   | **E2B** | ~2 GB | Mobile / edge (phones, Raspberry Pi 5, Jetson) | Smallest; multimodal; lightest reasoning |
-   | **E4B** (`latest`) | ~5 GB | Laptop / edge (GTX 1060 6GB and up) | Default tag; multimodal; good all-round small model |
-   | **26B-A4B** | ~15–18 GB | Desktop (RTX 3090/4090, 32 GB Apple Silicon) | MoE — only ~4B active params per token, so ~4B speed with much higher quality |
-   | **31B** | ~20 GB | Workstation / server / cloud | Dense; maximum quality |
+   | Variant | VRAM (Q4_0) | Target device | Multimodality | Context |
+   | --- | --- | --- | --- | --- |
+   | **E2B** | ~2.9 GB | Ultra-mobile / edge / browser (e.g. Pixel, Chrome) | Text + image + audio | 128K |
+   | **E4B** (`latest`) | ~4.5 GB | Edge / laptop | Text + image + audio | 128K |
+   | **12B** | ~6.7 GB | Local desktop (mid-range GPU) | Text + image + audio | 256K |
+   | **26B-A4B** | ~14.4 GB | Desktop (RTX 3090/4090, 32 GB Apple Silicon) | Text + image + video | 256K |
+   | **31B** | ~17.5 GB | Workstation / server / cloud | Text + image + video | 256K |
 
-   > The `E` prefix means *Efficient* (edge-optimized). `26B-A4B` is a Mixture-of-Experts model: 26B total parameters but only ~4B active per token. Pull a specific variant with its tag, e.g. `ollama run gemma4:e2b` or `ollama run gemma4:26b-a4b`. Numbers above are approximate and change over time — confirm on the [Ollama library](https://ollama.com/library).
+   > The `E` prefix means *Efficient* (edge-optimized); E2B and E4B report "effective" parameter counts (~2B and ~4B) but use Per-Layer Embeddings (PLE), so their real memory footprint is larger than the effective parameter count suggests. `26B-A4B` is a Mixture-of-Experts model: 26B total parameters but only ~4B active per token — note all 26B must still be loaded into memory. The `12B` is a unified dense model that handles multimodal tasks via direct linear projections instead of separate vision/audio encoders.
+   >
+   > VRAM numbers reflect model weights only (with ~20% loading overhead) and exclude the context window — larger `num_ctx` values consume significantly more. Pull a specific variant with its tag, e.g. `ollama run gemma4:e2b` or `ollama run gemma4:26b-a4b`. Figures are from Google's official [Gemma 4 overview](https://ai.google.dev/gemma/docs/core) and may change with tooling — confirm on the [Ollama library](https://ollama.com/library) and with `ollama show <model>`.
 
    **Other popular open-source models** you can swap in (replace `gemma4` in the command above):
 
@@ -72,6 +77,8 @@ If you want to interact with the models directly through your terminal without r
    | **Llama 3.2** (Meta) | `ollama run llama3.2:3b` | Lightweight, runs on modest hardware; most-downloaded model |
 
    > Pick the model that fits your hardware (RAM/VRAM) and task. Larger models are not always better for quick local tasks — start small and scale up only if needed. Always confirm the current tag on the [Ollama library](https://ollama.com/library), since tags change over time.
+
+   > **Official documentation:** for authoritative details on the Gemma 4 family — architectures, memory requirements, quantization, and capabilities — see Google's [Gemma 4 model overview](https://ai.google.dev/gemma/docs/core) and the [Ollama integration guide](https://ai.google.dev/gemma/docs/integrations/ollama).
 
 3. **Interaction:**
    After the initial download of your chosen variant, the chat interface will appear directly in your terminal. You can type your prompts and receive responses in real-time.
